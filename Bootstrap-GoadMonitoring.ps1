@@ -92,7 +92,7 @@ if ([IO.Path]::GetPathRoot($LabRoot) -eq $LabRoot) {
 }
 $goadPath = Join-Path $LabRoot 'GOAD'
 $dockerElkPath = Join-Path $LabRoot 'docker-elk'
-$venvPath = Join-Path $goadPath '.venv'
+$venvPath = Join-Path $LabRoot 'venv'
 $transcriptPath = Join-Path $LabRoot ('goad-clean-build-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '.log')
 
 New-Item -ItemType Directory -Path $LabRoot -Force | Out-Null
@@ -106,7 +106,7 @@ try {
     }
     $python = Resolve-Python -RequestedCommand $PythonCommand
     Ensure-DockerEngine
-    foreach ($path in @($goadPath, $dockerElkPath)) {
+    foreach ($path in @($goadPath, $dockerElkPath, $venvPath)) {
         if (Test-Path -LiteralPath $path) {
             throw "Clean bootstrap target already exists: $path"
         }
