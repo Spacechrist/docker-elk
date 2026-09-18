@@ -78,7 +78,7 @@ if ([IO.Path]::GetPathRoot($LabRoot) -eq $LabRoot) {
 }
 $goadPath = Join-Path $LabRoot 'GOAD'
 $dockerElkPath = Join-Path $LabRoot 'docker-elk'
-$venvPath = Join-Path $LabRoot 'venv'
+$venvPath = Join-Path $goadPath '.venv'
 $providerRoot = Join-Path $goadPath 'workspace'
 $venvPython = Join-Path $venvPath 'Scripts\python.exe'
 $goadEntryPoint = Join-Path $goadPath 'goad.py'
@@ -136,7 +136,7 @@ foreach ($volumeName in @('goad-monitoring_elasticsearch', 'docker-elk_elasticse
 
 Write-Host 'Permanently deleting repositories, generated certificates, secrets, and Python environment...' -ForegroundColor Yellow
 Set-Location $LabRoot
-foreach ($path in @($dockerElkPath, $goadPath, $venvPath)) {
+foreach ($path in @($dockerElkPath, $goadPath)) {
     if (Test-Path -LiteralPath $path) {
         $resolved = [IO.Path]::GetFullPath($path)
         if ($resolved -notlike ($LabRoot.TrimEnd('\') + '\*')) {

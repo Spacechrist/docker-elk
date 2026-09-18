@@ -77,8 +77,8 @@ Use `-Target dc01` for a canary deployment. Local secrets written to `.env` and
 
 For a completely empty `C:\lab`, use the repository-root
 `Bootstrap-GoadMonitoring.ps1`. It clones the fixed GOAD and docker-elk
-branches, creates the GOAD Python virtual environment, provisions GOAD with
-VMware, discovers the generated instance identifier, and then invokes
+branches, creates the GOAD Python virtual environment at `GOAD\.venv`,
+provisions GOAD with VMware, discovers the generated instance identifier, and then invokes
 `Install-GoadMonitoring.ps1`.
 
 `Reset-GoadMonitoring.ps1` is the destructive clean-room companion. It refuses
@@ -86,7 +86,7 @@ to run unless permanent destruction is explicitly selected and both local
 repositories match their tracking and remote branches. It asks GOAD itself to
 destroy the selected VMware instance, checks for residual Vagrant machines,
 and removes the Compose project before deleting only `C:\lab\GOAD`,
-`C:\lab\docker-elk`, and `C:\lab\venv`.
+including its `.venv`, and `C:\lab\docker-elk`.
 
 ## Recommended first run
 
