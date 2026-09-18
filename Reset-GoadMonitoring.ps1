@@ -4,6 +4,9 @@ param(
     [string]$LabRoot = 'C:\lab',
     [string]$GoadBranch = 'feature/elastic-monitoring',
     [string]$DockerElkBranch = 'feature/goad-monitoring',
+    [string]$GoadLab = 'GOAD',
+    [string]$GoadProvider = 'vmware',
+    [string]$GoadMethod = 'local',
     [switch]$ConfirmPermanentDestruction
 )
 
@@ -77,12 +80,36 @@ $goadPath = Join-Path $LabRoot 'GOAD'
 $dockerElkPath = Join-Path $LabRoot 'docker-elk'
 $venvPath = Join-Path $LabRoot 'venv'
 $providerRoot = Join-Path $goadPath 'workspace'
+$venvPython = Join-Path $venvPath 'Scripts\python.exe'
+$goadEntryPoint = Join-Path $goadPath 'goad.py'
 
 Write-Host 'Validating that both repositories are recoverable before deletion...' -ForegroundColor Yellow
 Assert-RemoteBranchCurrent -RepositoryPath $goadPath -Branch $GoadBranch
 Assert-RemoteBranchCurrent -RepositoryPath $dockerElkPath -Branch $DockerElkBranch -AllowedDirtyPath @('.env')
 
-Write-Host 'Destroying GOAD VMware machines...' -ForegroundColor Yellow
+Write-Host 'Destroying the GOAD instance through goad.py...' -ForegroundColor Yellow
+$instances = @(Get-ChildItem -LiteralPath $providerRoot -Directory -ErrorAction Stop |
+    Where-Object {
+        $_.Name -like '*-goad-vmware' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'provider\Vagrantfile') -PathType Leaf)
+    })
+if ($instances.Count -ne 1) {
+    throw "Expected exactly one GOAD VMware instance, found $($instances.Count)."
+}
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+    throw "GOAD virtual-environment Python was not found: $venvPython"
+}
+if (-not (Test-Path -LiteralPath $goadEntryPoint -PathType Leaf)) {
+    throw "GOAD entry point was not found: $goadEntryPoint"
+}
+$instanceName = $instances[0].Name
+Invoke-Native -FilePath $venvPython -WorkingDirectory $goadPath -ArgumentList @(
+    'goad.py', '--task', 'destroy', '--lab', $GoadLab,
+    '--provider', $GoadProvider, '--method', $GoadMethod,
+    '--instance', $instanceName
+) -Description "GOAD destroy for $instanceName"
+
+Write-Host 'Checking for residual Vagrant machines...' -ForegroundColor Yellow
 $providers = @(Get-ChildItem -LiteralPath $providerRoot -Directory -ErrorAction SilentlyContinue |
     ForEach-Object { Join-Path $_.FullName 'provider' } |
     Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Vagrantfile') -PathType Leaf })

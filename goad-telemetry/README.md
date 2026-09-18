@@ -83,8 +83,9 @@ VMware, discovers the generated instance identifier, and then invokes
 
 `Reset-GoadMonitoring.ps1` is the destructive clean-room companion. It refuses
 to run unless permanent destruction is explicitly selected and both local
-repositories match their tracking and remote branches. It destroys the VMware
-VMs and Compose project before deleting only `C:\lab\GOAD`,
+repositories match their tracking and remote branches. It asks GOAD itself to
+destroy the selected VMware instance, checks for residual Vagrant machines,
+and removes the Compose project before deleting only `C:\lab\GOAD`,
 `C:\lab\docker-elk`, and `C:\lab\venv`.
 
 ## Recommended first run
