@@ -25,11 +25,12 @@ services:
       FLEET_SERVER_ENABLE: '1'
       FLEET_SERVER_HOST: 0.0.0.0
       FLEET_SERVER_POLICY_ID: fleet-server-policy
-      FLEET_URL: https://fleet-server:8220
+      # Advertise the address reachable from the GOAD Windows guests.
+      FLEET_URL: https://192.168.56.1:8220
       FLEET_SERVER_CERT: /usr/share/elastic-agent/fleet-server.crt
       FLEET_SERVER_CERT_KEY: /usr/share/elastic-agent/fleet-server.key
-      # Use the HTTPS scheme if the Kibana server has TLS enabled (disabled by default)
-      #KIBANA_HOST: https://kibana:5601
+      KIBANA_HOST: https://kibana:5601
+      KIBANA_CA: /usr/share/elastic-agent/ca.crt
       ELASTICSEARCH_HOST: https://elasticsearch:9200
       ELASTICSEARCH_CA: /usr/share/elastic-agent/ca.crt
       # Fleet plugin in Kibana
@@ -41,7 +42,7 @@ services:
       # (b) Enroll using a pre-generated service token
       #FLEET_SERVER_SERVICE_TOKEN: <service_token>
     ports:
-      - 8220:8220
+      - "192.168.56.1:8220:8220"
     hostname: fleet-server
     # Elastic Agent does not retry failed connections to Kibana upon the initial enrollment phase.
     restart: on-failure

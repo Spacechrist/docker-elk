@@ -1,0 +1,5 @@
+
+.goad-secrets/
+.goad-secrets/
+kibana/config/kibana.yml.goad-before-ca.bak
+tls/certs.pre-goad-*/

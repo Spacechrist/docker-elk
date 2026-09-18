@@ -24,7 +24,7 @@ services:
       - ./tls/certs:/usr/share/elasticsearch/tls/certs:z
 
   # The 'setup' service runs a one-off script which initializes users inside
-  # Elasticsearch — such as 'logstash_internal' and 'kibana_system' — with the
+  # Elasticsearch Ã¢â‚¬â€ such as 'logstash_internal' and 'kibana_system' Ã¢â‚¬â€ with the
   # values of the passwords defined in the '.env' file. It also creates the
   # roles required by some of these users.
   #
@@ -55,6 +55,10 @@ services:
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
       LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
       KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+      KIBANA_SECURITY_ENCRYPTION_KEY: ${KIBANA_SECURITY_ENCRYPTION_KEY}
+      KIBANA_SAVED_OBJECTS_ENCRYPTION_KEY: ${KIBANA_SAVED_OBJECTS_ENCRYPTION_KEY}
+      KIBANA_REPORTING_ENCRYPTION_KEY: ${KIBANA_REPORTING_ENCRYPTION_KEY}
+      ELASTIC_CA_FINGERPRINT: ${ELASTIC_CA_FINGERPRINT}
       METRICBEAT_INTERNAL_PASSWORD: ${METRICBEAT_INTERNAL_PASSWORD:-}
       FILEBEAT_INTERNAL_PASSWORD: ${FILEBEAT_INTERNAL_PASSWORD:-}
       HEARTBEAT_INTERNAL_PASSWORD: ${HEARTBEAT_INTERNAL_PASSWORD:-}
@@ -96,8 +100,8 @@ services:
       - ./tls/certs/elasticsearch/elasticsearch.crt:/usr/share/elasticsearch/config/elasticsearch.crt:ro,z
       - ./tls/certs/elasticsearch/elasticsearch.key:/usr/share/elasticsearch/config/elasticsearch.key:ro,z
     ports:
-      - 9200:9200
-      - 9300:9300
+      - "192.168.56.1:9200:9200"
+      - "192.168.56.1:9300:9300"
     environment:
       node.name: elasticsearch
       ES_JAVA_OPTS: -Xms512m -Xmx512m
@@ -123,10 +127,10 @@ services:
       # (!) CA certificate. Generate using the 'tls' service.
       - ./tls/certs/ca/ca.crt:/usr/share/logstash/config/ca.crt:ro,z
     ports:
-      - 5044:5044
-      - 50000:50000/tcp
-      - 50000:50000/udp
-      - 9600:9600
+      - "192.168.56.1:5044:5044"
+      - "192.168.56.1:50000:50000/tcp"
+      - "192.168.56.1:50000:50000/udp"
+      - "192.168.56.1:9600:9600"
     environment:
       LS_JAVA_OPTS: -Xms256m -Xmx256m
       LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
@@ -148,9 +152,13 @@ services:
       - ./tls/certs/kibana/kibana.crt:/usr/share/kibana/config/kibana.crt:ro,Z
       - ./tls/certs/kibana/kibana.key:/usr/share/kibana/config/kibana.key:ro,Z
     ports:
-      - 5601:5601
+      - "192.168.56.1:5601:5601"
     environment:
       KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+      KIBANA_SECURITY_ENCRYPTION_KEY: ${KIBANA_SECURITY_ENCRYPTION_KEY}
+      KIBANA_SAVED_OBJECTS_ENCRYPTION_KEY: ${KIBANA_SAVED_OBJECTS_ENCRYPTION_KEY}
+      KIBANA_REPORTING_ENCRYPTION_KEY: ${KIBANA_REPORTING_ENCRYPTION_KEY}
+      ELASTIC_CA_FINGERPRINT: ${ELASTIC_CA_FINGERPRINT}
     networks:
       - elk
     depends_on:

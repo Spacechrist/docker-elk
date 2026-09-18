@@ -10,6 +10,7 @@ instances:
   - localhost      # local connections
   ip:
   - 127.0.0.1      # local connections
+  - 192.168.56.1   # GOAD host-only adapter, used by Windows agents
   - ::1
 
 - name: kibana
@@ -20,6 +21,7 @@ instances:
   - kibana                     # resolved by Fleet, if configured to use the Compose service name
   ip:
   - 127.0.0.1
+  - 192.168.56.1               # GOAD host-only adapter
   - ::1
 
 - name: fleet-server
@@ -28,6 +30,7 @@ instances:
   - localhost
   ip:
   - 127.0.0.1
+  - 192.168.56.1               # GOAD host-only adapter, used by Windows agents
   - ::1
 
 - name: apm-server

@@ -1,0 +1,257 @@
+---
+- name: Install GOAD Windows telemetry
+  hosts: dc01:dc02:dc03:srv02:srv03
+  gather_facts: false
+  serial: 1
+  vars:
+    telemetry_root: 'C:\ProgramData\GOAD-Telemetry'
+    fleet_ca_path: '{{ telemetry_root }}\ca.crt'
+    sysmon_zip_path: '{{ telemetry_root }}\Sysmon.zip'
+    sysmon_directory: '{{ telemetry_root }}\Sysmon'
+    sysmon_executable: '{{ sysmon_directory }}\Sysmon64.exe'
+    sysmon_config_path: '{{ telemetry_root }}\sysmonconfig.xml'
+    yamato_script_path: '{{ telemetry_root }}\YamatoSecurityConfigureWinEventLogs.bat'
+    elastic_agent_msi_path: '{{ telemetry_root }}\elastic-agent-{{ elastic_agent_version }}-windows-x86_64.msi'
+    elastic_agent_msi_url: 'https://artifacts.elastic.co/downloads/beats/elastic-agent/elastic-agent-{{ elastic_agent_version }}-windows-x86_64.msi'
+
+  pre_tasks:
+    - name: Confirm GOAD configured this host for Windows remoting
+      ansible.builtin.assert:
+        that:
+          - ansible_connection | default('') in ['winrm', 'psrp']
+        fail_msg: >-
+          {{ inventory_hostname }} is not configured for WinRM or PSRP. The
+          complete GOAD inventory stack was not loaded, or the wrong inventory
+          mode was selected.
+
+    - name: Validate required deployment variables
+      ansible.builtin.assert:
+        that:
+          - fleet_url is match('^https://')
+          - fleet_enrollment_token | length > 20
+          - elastic_agent_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+          - goad_ca_source | length > 0
+        fail_msg: Required Fleet enrollment variables are missing or invalid.
+      no_log: true
+
+    - name: Confirm Fleet Server is reachable from the Windows VM
+      ansible.windows.win_wait_for:
+        host: '{{ fleet_host }}'
+        port: '{{ fleet_port }}'
+        timeout: 30
+
+  tasks:
+    - name: Create the telemetry staging directory
+      ansible.windows.win_file:
+        path: '{{ telemetry_root }}'
+        state: directory
+
+    - name: Install the Fleet certificate authority
+      ansible.windows.win_copy:
+        src: '{{ goad_ca_source }}'
+        dest: '{{ fleet_ca_path }}'
+
+    - name: Trust the GOAD monitoring certificate authority system-wide
+      ansible.windows.win_certificate_store:
+        path: '{{ fleet_ca_path }}'
+        state: present
+        store_location: LocalMachine
+        store_name: Root
+      register: fleet_ca_trust
+
+    - name: Download Sysmon
+      ansible.windows.win_get_url:
+        url: '{{ sysmon_download_url }}'
+        dest: '{{ sysmon_zip_path }}'
+        force: false
+
+    - name: Expand Sysmon
+      ansible.windows.win_powershell:
+        script: |
+          if (Test-Path -LiteralPath '{{ sysmon_executable }}') {
+              $Ansible.Changed = $false
+              return
+          }
+          if (Test-Path -LiteralPath '{{ sysmon_directory }}') {
+              Remove-Item -LiteralPath '{{ sysmon_directory }}' -Recurse -Force
+          }
+          Expand-Archive -LiteralPath '{{ sysmon_zip_path }}' -DestinationPath '{{ sysmon_directory }}' -Force
+
+    - name: Verify the Sysmon executable signature
+      ansible.windows.win_powershell:
+        script: |
+          $signature = Get-AuthenticodeSignature -LiteralPath '{{ sysmon_executable }}'
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+              throw "Sysmon signature validation failed: $($signature.Status) / $($signature.SignerCertificate.Subject)"
+          }
+          $Ansible.Changed = $false
+
+    - name: Copy the staged Olaf Hartong Sysmon configuration
+      ansible.windows.win_copy:
+        src: '{{ goad_sysmon_config_source }}'
+        dest: '{{ sysmon_config_path }}'
+
+    - name: Validate the downloaded Sysmon configuration
+      ansible.windows.win_powershell:
+        script: |
+          $configPath = '{{ sysmon_config_path }}'
+          try {
+              [xml]$configuration = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop
+          } catch {
+              throw "Downloaded Sysmon configuration is not valid XML: $($_.Exception.Message)"
+          }
+          if ($configuration.DocumentElement.LocalName -ne 'Sysmon') {
+              throw "Unexpected Sysmon configuration root element: $($configuration.DocumentElement.LocalName)"
+          }
+          $Ansible.Changed = $false
+
+    - name: Install or update Sysmon configuration
+      ansible.windows.win_powershell:
+        script: |
+          $configPath = '{{ sysmon_config_path }}'
+          $markerPath = '{{ telemetry_root }}\sysmonconfig.sha256'
+          $newHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+          $oldHash = if (Test-Path -LiteralPath $markerPath) {
+              (Get-Content -LiteralPath $markerPath -Raw).Trim()
+          } else { '' }
+          $service = Get-Service -Name 'Sysmon64','Sysmon' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $service -and $oldHash -eq $newHash) {
+              if ($service.Status -ne 'Running') { Start-Service -Name $service.Name }
+              $Ansible.Changed = $false
+              return
+          }
+          $mode = if ($null -eq $service) { '-i' } else { '-c' }
+          $process = Start-Process -FilePath '{{ sysmon_executable }}' `
+              -ArgumentList @('-accepteula', $mode, $configPath) `
+              -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) {
+              throw "Sysmon returned exit code $($process.ExitCode)."
+          }
+          Set-Content -LiteralPath $markerPath -Value $newHash -Encoding ASCII
+
+    - name: Increase the Sysmon event log capacity
+      ansible.windows.win_powershell:
+        script: |
+          $channel = 'Microsoft-Windows-Sysmon/Operational'
+          $current = Get-WinEvent -ListLog $channel -ErrorAction Stop
+          if ($current.MaximumSizeInBytes -eq 1073741824) {
+              $Ansible.Changed = $false
+              return
+          }
+          & wevtutil.exe sl $channel /ms:1073741824
+          if ($LASTEXITCODE -ne 0) { throw "wevtutil returned $LASTEXITCODE" }
+
+    - name: Copy the staged Yamato Security Windows logging configuration
+      ansible.windows.win_copy:
+        src: '{{ goad_yamato_script_source }}'
+        dest: '{{ yamato_script_path }}'
+
+    - name: Apply enhanced Windows event logging settings
+      ansible.windows.win_powershell:
+        script: |
+          $scriptPath = '{{ yamato_script_path }}'
+          $markerPath = '{{ telemetry_root }}\yamato-settings.sha256'
+          $newHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash
+          $oldHash = if (Test-Path -LiteralPath $markerPath) {
+              (Get-Content -LiteralPath $markerPath -Raw).Trim()
+          } else { '' }
+          if ($oldHash -eq $newHash) {
+              $Ansible.Changed = $false
+              return
+          }
+          $process = Start-Process -FilePath 'cmd.exe' `
+              -ArgumentList @('/d', '/c', $scriptPath) `
+              -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) {
+              throw "Yamato logging configuration returned exit code $($process.ExitCode)."
+          }
+          Set-Content -LiteralPath $markerPath -Value $newHash -Encoding ASCII
+
+    - name: Download Elastic Agent MSI
+      ansible.windows.win_get_url:
+        url: '{{ elastic_agent_msi_url }}'
+        dest: '{{ elastic_agent_msi_path }}'
+        force: false
+
+    - name: Verify the Elastic Agent MSI signature
+      ansible.windows.win_powershell:
+        script: |
+          $signature = Get-AuthenticodeSignature -LiteralPath '{{ elastic_agent_msi_path }}'
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Elasticsearch') {
+              throw "Elastic Agent signature validation failed: $($signature.Status) / $($signature.SignerCertificate.Subject)"
+          }
+          $Ansible.Changed = $false
+
+    - name: Install and enroll Elastic Agent
+      ansible.windows.win_powershell:
+        script: |
+          $service = Get-Service -Name 'Elastic Agent' -ErrorAction SilentlyContinue
+          if ($null -ne $service) {
+              if ($service.Status -ne 'Running') { Start-Service -Name $service.Name }
+              $Ansible.Changed = $false
+              return
+          }
+          $installArguments = '--url={{ fleet_url }} --enrollment-token={{ fleet_enrollment_token }} --certificate-authorities={{ fleet_ca_path }} --non-interactive'
+          $msiArguments = @(
+              '/i',
+              '{{ elastic_agent_msi_path }}',
+              '/qn',
+              '/norestart',
+              ('INSTALLARGS="{0}"' -f $installArguments)
+          )
+          $process = Start-Process -FilePath 'msiexec.exe' `
+              -ArgumentList $msiArguments `
+              -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -notin @(0, 3010)) {
+              throw "Elastic Agent MSI returned exit code $($process.ExitCode)."
+          }
+      no_log: true
+
+    - name: Restart Elastic Agent after updating the Windows trust store
+      ansible.windows.win_service:
+        name: Elastic Agent
+        state: restarted
+      when: fleet_ca_trust.changed
+
+    - name: Wait for Elastic Agent service
+      ansible.windows.win_service:
+        name: Elastic Agent
+        state: started
+      register: elastic_agent_service
+      retries: 12
+      delay: 5
+      until: elastic_agent_service.state == 'running'
+
+    - name: Read Elastic Agent status
+      ansible.windows.win_command:
+        argv:
+          - 'C:\Program Files\Elastic\Agent\elastic-agent.exe'
+          - status
+          - --output
+          - json
+      register: elastic_agent_status
+      changed_when: false
+      retries: 30
+      delay: 10
+      until:
+        - elastic_agent_status.rc == 0
+        - '"HEALTHY" in elastic_agent_status.stdout'
+
+    - name: Confirm Sysmon and Elastic Agent are operational
+      ansible.windows.win_powershell:
+        script: |
+          $sysmon = Get-Service -Name 'Sysmon64','Sysmon' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $agent = Get-Service -Name 'Elastic Agent' -ErrorAction Stop
+          $channel = Get-WinEvent -ListLog 'Microsoft-Windows-Sysmon/Operational' -ErrorAction Stop
+          [pscustomobject]@{
+              ComputerName = $env:COMPUTERNAME
+              SysmonService = $sysmon.Status.ToString()
+              ElasticAgentService = $agent.Status.ToString()
+              SysmonChannelEnabled = $channel.IsEnabled
+          }
+          $Ansible.Changed = $false
+      register: telemetry_validation
+
+    - name: Display host validation
+      ansible.builtin.debug:
+        var: telemetry_validation.output
