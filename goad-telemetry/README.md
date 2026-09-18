@@ -75,6 +75,18 @@ troubleshooting or rerunning a completed deployment:
 Use `-Target dc01` for a canary deployment. Local secrets written to `.env` and
 `.goad-secrets` are runtime material and must not be committed.
 
+For a completely empty `C:\lab`, use the repository-root
+`Bootstrap-GoadMonitoring.ps1`. It clones the fixed GOAD and docker-elk
+branches, creates the GOAD Python virtual environment, provisions GOAD with
+VMware, discovers the generated instance identifier, and then invokes
+`Install-GoadMonitoring.ps1`.
+
+`Reset-GoadMonitoring.ps1` is the destructive clean-room companion. It refuses
+to run unless permanent destruction is explicitly selected and both local
+repositories match their tracking and remote branches. It destroys the VMware
+VMs and Compose project before deleting only `C:\lab\GOAD`,
+`C:\lab\docker-elk`, and `C:\lab\venv`.
+
 ## Recommended first run
 
 Before deploying agents, run the idempotent Fleet initializer from the
