@@ -146,9 +146,7 @@ function Install-GoadPythonDependencies {
         }
         Invoke-Native -FilePath $PythonPath -ArgumentList @('-m', 'pip', 'install', '-r', $installPath) `
             -Description 'GOAD Python dependency installation'
-        Invoke-Native -FilePath $PythonPath -ArgumentList @(
-            '-c', 'import rich, psutil, jinja2, yaml, ansible_runner, winrm; print("GOAD Python dependencies OK")'
-        ) -Description 'GOAD Python dependency validation'
+        Invoke-Native -FilePath $PythonPath -ArgumentList @('-m', 'pip', 'check') -Description 'GOAD Python dependency validation'
     }
     finally {
         if ($temporaryRequirements -and (Test-Path -LiteralPath $temporaryRequirements)) {
