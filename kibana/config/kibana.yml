@@ -61,37 +61,7 @@ xpack.fleet.outputs:
     is_default: true
     is_default_monitoring: true
 
-  - id: goad-windows-output
-    name: GOAD Windows
-    type: elasticsearch
-    hosts: [ https://192.168.56.1:9200 ]
-    ca_trusted_fingerprint: ${ELASTIC_CA_FINGERPRINT}
-    is_default: false
-    is_default_monitoring: false
 
-    ssl:
-      certificate_authorities:
-        - |
-          -----BEGIN CERTIFICATE-----
-          MIIDWjCCAkKgAwIBAgIVAML2sLBle3vyL3t9ywUsjPmJKEsVMA0GCSqGSIb3DQEB
-          CwUAMDQxMjAwBgNVBAMTKUVsYXN0aWMgQ2VydGlmaWNhdGUgVG9vbCBBdXRvZ2Vu
-          ZXJhdGVkIENBMB4XDTI2MDkxODA4MjgyMVoXDTI5MDkxNzA4MjgyMVowNDEyMDAG
-          A1UEAxMpRWxhc3RpYyBDZXJ0aWZpY2F0ZSBUb29sIEF1dG9nZW5lcmF0ZWQgQ0Ew
-          ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCD4jrSB2xEG7EUQxmgBldh
-          Ylh1oR0MYoJKqnc1sRajqfdStCxdSSCaGv1Onv0UYdjvLqnXTscLsSVRfrO8k0JK
-          j8nI2VOR4xLRhU2R+YK5m9D08Rm0Av/tUiqMYVECn3lwR7DCVBtIQF/zKiE9dOO4
-          WIcLL/o7+QQ1AVsLByNeowIdLzbzbaLrEZXglBpDJETuUlDcDor64QxN7YvKaiku
-          +fx0VSh1AkMc94bcOmiIro6Qx1NZECS/zi5Kzt8UXZy3bGDYE+RCnqEDmgvv0+WL
-          hw3BCPRmUnmA+GcmwvA+Xpjrjtjasvk1hIi9O1dLFDTjCbbrHvCWtdmy1Jmslid7
-          AgMBAAGjYzBhMB0GA1UdDgQWBBQ/to9FNitewzNugZ2TwUP0uiN1djAfBgNVHSME
-          GDAWgBQ/to9FNitewzNugZ2TwUP0uiN1djAPBgNVHRMBAf8EBTADAQH/MA4GA1Ud
-          DwEB/wQEAwIBBjANBgkqhkiG9w0BAQsFAAOCAQEAZtKwu/386geLMlgkzePcT3I2
-          Pr1dbMOkYnrUqAafCIvGxhSaCKEuarVFXN5wN4UBb3iIo7IexNOUgsc62pmz2yjE
-          JhGeJsB4M8pQF/TXO4C3OqSTw9wPLi90enaLaZA2a0tzMbku0cnJ6te0N7+LezD5
-          anJumfa5n9ggu7M74hb+zg2gdkvO9IQUbwGchsmNxZ33D9cKyCmfrX9kbaFZYdcQ
-          OEiLrl+4hoswg0xnPuyH+/c43tqKqksLUJzMrQt1R4Qiv7AiEeAj+8V4d+lrqC1K
-          A69ZjcBUM8/1Y7bFcEwMIROC8k5M30MYm8R8z0+/PVXV/tozqR2Pb86iR7kSCw==
-          -----END CERTIFICATE-----
 xpack.fleet.packages:
   - name: fleet_server
     version: latest

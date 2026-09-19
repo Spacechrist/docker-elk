@@ -6,13 +6,13 @@ param(
     [string]$GoadBranch = 'feature/elastic-monitoring',
     [string]$DockerElkRepository = 'https://github.com/Spacechrist/docker-elk',
     [string]$DockerElkBranch = 'feature/goad-monitoring',
-    [string]$RequiredGoadAncestor = 'c26d592a45f3c7a85d525ddcc50d1c725c743bdd',
+    [string]$RequiredGoadAncestor = '6aa04d86a0a61445fd04a45385c3f877417ea665',
     [string]$RequiredDockerElkAncestor = '5459587de58dc3c0e605dd014c4b4fde5008b03a',
     [string]$PythonCommand = 'python.exe',
     [string]$LabName = 'GOAD',
     [string]$Provider = 'vmware',
     [string]$IpRange = '192.168.56',
-    [string]$Method = 'local',
+    [string]$Method = 'vm',
     [ValidateSet('standard', 'disabled-vagrant')]
     [string]$InventoryMode = 'standard',
     [ValidateSet('all-windows', 'dc01', 'dc02', 'dc03', 'srv02', 'srv03')]
@@ -68,6 +68,41 @@ function Assert-GitAncestor {
     }
 }
 
+function Ensure-RepositoryClone {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Branch,
+        [Parameter(Mandatory)][string]$RequiredCommit,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    if (Test-Path -LiteralPath (Join-Path $Path '.git') -PathType Container) {
+        $currentBranch = (& git.exe -C $Path branch --show-current).Trim()
+        if ($LASTEXITCODE -ne 0 -or $currentBranch -ne $Branch) {
+            throw "Expected $Description branch '$Branch'; found '$currentBranch' in $Path."
+        }
+        $dirty = @(& git.exe -C $Path status --porcelain | Where-Object {
+            $_ -notmatch '^\?\? \.venv(?:/|$)'
+        })
+        if ($dirty.Count -gt 0) {
+            throw "$Description clone has unexpected local changes:`n$($dirty -join "`n")"
+        }
+        Invoke-Native -FilePath 'git.exe' -ArgumentList @('-C', $Path, 'fetch', 'origin', $Branch) `
+            -Description "$Description fetch"
+        Assert-GitAncestor -RepositoryPath $Path -RequiredCommit $RequiredCommit -Description $Description
+        Write-Host "Reusing existing $Description clone at $Path."
+        return
+    }
+    if (Test-Path -LiteralPath $Path) {
+        throw "$Description target exists but is not a Git repository: $Path"
+    }
+    Invoke-Native -FilePath 'git.exe' -ArgumentList @(
+        'clone', '--branch', $Branch, '--single-branch', $Repository, $Path
+    ) -Description "$Description clone"
+    Assert-GitAncestor -RepositoryPath $Path -RequiredCommit $RequiredCommit -Description $Description
+}
+
 function Ensure-DockerEngine {
     & docker.exe info --format '{{.ServerVersion}}' 2>$null
     if ($LASTEXITCODE -eq 0) { return }
@@ -84,6 +119,42 @@ function Ensure-DockerEngine {
         if ($LASTEXITCODE -eq 0) { return }
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Docker Desktop did not become ready within five minutes.'
+}
+
+function Install-GoadPythonDependencies {
+    param(
+        [Parameter(Mandatory)][string]$PythonPath,
+        [Parameter(Mandatory)][string]$RequirementsPath
+    )
+
+    $installPath = $RequirementsPath
+    $temporaryRequirements = $null
+    $nativeWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    try {
+        if ($nativeWindows) {
+            $temporaryRequirements = [IO.Path]::GetTempFileName()
+            $lines = @(Get-Content -LiteralPath $RequirementsPath | Where-Object {
+                $_ -notmatch '^\s*ansible-core(?:\s*[<>=!~].*)?\s*$'
+            })
+            [IO.File]::WriteAllLines(
+                $temporaryRequirements,
+                [string[]]$lines,
+                (New-Object Text.UTF8Encoding($false))
+            )
+            $installPath = $temporaryRequirements
+            Write-Host 'Native Windows detected: ansible-core is delegated to the Linux PROVISIONING VM.'
+        }
+        Invoke-Native -FilePath $PythonPath -ArgumentList @('-m', 'pip', 'install', '-r', $installPath) `
+            -Description 'GOAD Python dependency installation'
+        Invoke-Native -FilePath $PythonPath -ArgumentList @(
+            '-c', 'import rich, psutil, jinja2, yaml, ansible_runner, winrm; print("GOAD Python dependencies OK")'
+        ) -Description 'GOAD Python dependency validation'
+    }
+    finally {
+        if ($temporaryRequirements -and (Test-Path -LiteralPath $temporaryRequirements)) {
+            Remove-Item -LiteralPath $temporaryRequirements -Force
+        }
+    }
 }
 
 $LabRoot = [IO.Path]::GetFullPath($LabRoot)
@@ -106,76 +177,48 @@ try {
     }
     $python = Resolve-Python -RequestedCommand $PythonCommand
     Ensure-DockerEngine
-    foreach ($path in @($goadPath, $dockerElkPath)) {
-        if (Test-Path -LiteralPath $path) {
-            throw "Clean bootstrap target already exists: $path"
-        }
-    }
-
     Write-Phase 'Cloning the fixed GOAD branch'
-    Invoke-Native -FilePath 'git.exe' -ArgumentList @(
-        'clone', '--branch', $GoadBranch, '--single-branch', $GoadRepository, $goadPath
-    ) -Description 'GOAD clone'
-    Assert-GitAncestor -RepositoryPath $goadPath -RequiredCommit $RequiredGoadAncestor -Description 'GOAD branch'
+    Ensure-RepositoryClone -Path $goadPath -Repository $GoadRepository -Branch $GoadBranch `
+        -RequiredCommit $RequiredGoadAncestor -Description 'GOAD'
 
     Write-Phase 'Cloning the GOAD monitoring branch of docker-elk'
-    Invoke-Native -FilePath 'git.exe' -ArgumentList @(
-        'clone', '--branch', $DockerElkBranch, '--single-branch', $DockerElkRepository, $dockerElkPath
-    ) -Description 'docker-elk clone'
-    Assert-GitAncestor -RepositoryPath $dockerElkPath -RequiredCommit $RequiredDockerElkAncestor -Description 'docker-elk branch'
+    Ensure-RepositoryClone -Path $dockerElkPath -Repository $DockerElkRepository -Branch $DockerElkBranch `
+        -RequiredCommit $RequiredDockerElkAncestor -Description 'docker-elk'
 
     Write-Phase 'Creating the GOAD Python environment'
-    $pythonArguments = if ([IO.Path]::GetFileName($python) -ieq 'py.exe') {
-        @('-3', '-m', 'venv', $venvPath)
+    $venvPython = Join-Path $venvPath 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        $pythonArguments = if ([IO.Path]::GetFileName($python) -ieq 'py.exe') {
+            @('-3', '-m', 'venv', $venvPath)
+        }
+        else {
+            @('-m', 'venv', $venvPath)
+        }
+        Invoke-Native -FilePath $python -ArgumentList $pythonArguments -Description 'Python virtual environment creation'
     }
     else {
-        @('-m', 'venv', $venvPath)
+        Write-Host "Reusing existing GOAD virtual environment at $venvPath."
     }
-    Invoke-Native -FilePath $python -ArgumentList $pythonArguments -Description 'Python virtual environment creation'
-    $venvPython = Join-Path $venvPath 'Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
         throw "Virtual-environment Python was not created: $venvPython"
     }
     Invoke-Native -FilePath $venvPython -ArgumentList @('-m', 'pip', 'install', '--upgrade', 'pip') `
         -Description 'pip upgrade'
     $requirements = @(
+        (Join-Path $goadPath 'noansible_requirements.yml'),
         (Join-Path $goadPath 'requirements.txt'),
         (Join-Path $goadPath 'requirements-windows.txt')
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
     if (-not $requirements) {
         throw 'No supported GOAD Python requirements file was found.'
     }
-    Invoke-Native -FilePath $venvPython -ArgumentList @('-m', 'pip', 'install', '-r', $requirements) `
-        -Description 'GOAD Python dependency installation'
+    Install-GoadPythonDependencies -PythonPath $venvPython -RequirementsPath $requirements
 
-    Write-Phase 'Installing and provisioning GOAD'
-    Invoke-Native -FilePath $venvPython -WorkingDirectory $goadPath -ArgumentList @(
-        'goad.py', '--task', 'install', '--lab', $LabName, '--provider', $Provider,
-        '--ip_range', $IpRange, '--method', $Method
-    ) -Description 'GOAD installation'
-
-    Write-Phase 'Discovering the generated GOAD instance'
-    $instances = @(Get-ChildItem -LiteralPath (Join-Path $goadPath 'workspace') -Directory -ErrorAction Stop |
-        Where-Object {
-            $_.Name -like '*-goad-vmware' -and
-            (Test-Path -LiteralPath (Join-Path $_.FullName 'provider\Vagrantfile') -PathType Leaf)
-        })
-    if ($instances.Count -ne 1) {
-        throw "Expected exactly one GOAD VMware instance, found $($instances.Count)."
-    }
-    $instanceName = $instances[0].Name
-    Write-Host "Discovered GOAD instance: $instanceName"
-
-    Write-Phase 'Deploying Elastic monitoring, Fleet, EDR, Sysmon, and Windows logging'
-    $monitoringInstaller = Join-Path $dockerElkPath 'Install-GoadMonitoring.ps1'
-    if (-not (Test-Path -LiteralPath $monitoringInstaller -PathType Leaf)) {
-        throw "Monitoring installer not found in cloned branch: $monitoringInstaller"
-    }
-    & $monitoringInstaller `
-        -DockerElkRoot $dockerElkPath -GoadRoot $goadPath -InstanceName $instanceName `
-        -LabName $LabName -InventoryMode $InventoryMode -Target $Target
-
-    Write-Host "`nClean GOAD monitoring deployment completed successfully." -ForegroundColor Green
+    Write-Host "`nClean-room preparation completed successfully." -ForegroundColor Green
+    Write-Host 'Run GOAD manually so its built-in retry and resume workflow remains visible:'
+    Write-Host "  cd $goadPath"
+    Write-Host "  .\.venv\Scripts\python.exe .\goad.py --task install --lab $LabName --provider $Provider --ip_range $IpRange --method $Method"
+    Write-Host 'After GOAD succeeds, run Install-GoadMonitoring.ps1 with the explicit generated instance name.'
     Write-Host "Transcript: $transcriptPath"
 }
 finally {

@@ -6,7 +6,8 @@ param(
     [string]$DockerElkBranch = 'feature/goad-monitoring',
     [string]$GoadLab = 'GOAD',
     [string]$GoadProvider = 'vmware',
-    [string]$GoadMethod = 'local',
+    [string]$GoadMethod = 'vm',
+    [string]$InstanceName,
     [switch]$ConfirmPermanentDestruction
 )
 
@@ -93,8 +94,15 @@ $instances = @(Get-ChildItem -LiteralPath $providerRoot -Directory -ErrorAction 
         $_.Name -like '*-goad-vmware' -and
         (Test-Path -LiteralPath (Join-Path $_.FullName 'provider\Vagrantfile') -PathType Leaf)
     })
-if ($instances.Count -ne 1) {
-    throw "Expected exactly one GOAD VMware instance, found $($instances.Count)."
+if ([string]::IsNullOrWhiteSpace($InstanceName)) {
+    if ($instances.Count -ne 1) {
+        $candidateNames = @($instances | ForEach-Object Name) -join ', '
+        throw "Expected exactly one GOAD VMware instance; found $($instances.Count): $candidateNames. Pass -InstanceName explicitly."
+    }
+    $InstanceName = $instances[0].Name
+}
+elseif (-not ($instances | Where-Object Name -eq $InstanceName)) {
+    throw "Requested GOAD instance was not found: $InstanceName"
 }
 if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
     throw "GOAD virtual-environment Python was not found: $venvPython"
@@ -102,12 +110,11 @@ if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $goadEntryPoint -PathType Leaf)) {
     throw "GOAD entry point was not found: $goadEntryPoint"
 }
-$instanceName = $instances[0].Name
 Invoke-Native -FilePath $venvPython -WorkingDirectory $goadPath -ArgumentList @(
     'goad.py', '--task', 'destroy', '--lab', $GoadLab,
     '--provider', $GoadProvider, '--method', $GoadMethod,
-    '--instance', $instanceName
-) -Description "GOAD destroy for $instanceName"
+    '--instance', $InstanceName
+) -Description "GOAD destroy for $InstanceName"
 
 Write-Host 'Checking for residual Vagrant machines...' -ForegroundColor Yellow
 $providers = @(Get-ChildItem -LiteralPath $providerRoot -Directory -ErrorAction SilentlyContinue |

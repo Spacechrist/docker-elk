@@ -98,6 +98,23 @@ function New-RandomHex {
     }
 }
 
+function Get-CertificateSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "CA certificate not found: $Path"
+    }
+    $certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($Path)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($certificate.RawData))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+        $certificate.Dispose()
+    }
+}
+
 function Ensure-LocalEnvironment {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -125,6 +142,9 @@ function Ensure-LocalEnvironment {
             Set-DotEnvValue -Path $Path -Name $name -Value (New-RandomHex)
             Write-Host "Generated local $name."
         }
+    }
+    if ($null -eq (Get-DotEnvValue -Path $Path -Name 'ELASTIC_CA_FINGERPRINT')) {
+        Set-DotEnvValue -Path $Path -Name 'ELASTIC_CA_FINGERPRINT' -Value ''
     }
 }
 
@@ -235,14 +255,23 @@ function Wait-FleetServer {
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $response = & curl.exe `
-            --silent `
-            --show-error `
-            --ssl-no-revoke `
-            --cacert $CaCertificate `
-            --max-time 10 `
-            "$($Url.TrimEnd('/'))/api/status" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $response) {
+        $response = $null
+        $curlExitCode = -1
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'SilentlyContinue'
+            $response = & curl.exe `
+                --silent `
+                --ssl-no-revoke `
+                --cacert $CaCertificate `
+                --max-time 10 `
+                "$($Url.TrimEnd('/'))/api/status" 2>$null
+            $curlExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($curlExitCode -eq 0 -and $response) {
             try {
                 $status = (($response -join '') | ConvertFrom-Json).status
                 Write-Host "Fleet Server status: $status"
@@ -396,6 +425,11 @@ if (-not $SkipStackSetup) {
                 '--profile', 'setup',
                 'run', '--rm', 'tls'
             ) -Description 'TLS certificate generation'
+        }
+        $caFingerprint = Get-CertificateSha256 -Path $caPath
+        if ((Get-DotEnvValue -Path $environmentPath -Name 'ELASTIC_CA_FINGERPRINT') -ne $caFingerprint) {
+            Set-DotEnvValue -Path $environmentPath -Name 'ELASTIC_CA_FINGERPRINT' -Value $caFingerprint
+            Write-Host 'Updated local ELASTIC_CA_FINGERPRINT.'
         }
         if (Test-ElasticsearchAuthentication `
             -Url "https://${LabAddress}:9200" `
