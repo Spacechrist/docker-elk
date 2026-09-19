@@ -396,7 +396,7 @@ elseif ($output.id -ne $OutputId) {
     throw "A preconfigured output named 'GOAD Windows output' exists with unexpected ID '$($output.id)'."
 }
 
-if ($null -ne $output -and $output.is_preconfigured -and -not (Test-OutputEmbeddedCa -Output $output)) {
+if ($null -ne $output -and $output.is_preconfigured) {
     Write-Host "Updating preconfigured Fleet output '$OutputId' in kibana.yml..."
     $kibanaConfiguration = Join-Path $PSScriptRoot 'kibana\config\kibana.yml'
     Ensure-PreconfiguredOutputCa `
