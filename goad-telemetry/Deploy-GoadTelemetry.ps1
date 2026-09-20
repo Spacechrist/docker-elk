@@ -12,7 +12,7 @@ param(
     [ValidateSet('all-windows', 'dc01', 'dc02', 'dc03', 'srv02', 'srv03')]
     [string]$Target = 'all-windows',
     [string]$SysmonDownloadUrl = 'https://download.sysinternals.com/files/Sysmon.zip',
-    [string]$SysmonConfigUrl = 'https://github.com/olafhartong/sysmon-modular/releases/latest/download/sysmonconfig.xml',
+    [string]$SysmonConfigUrl = 'https://github.com/olafhartong/sysmon-modular/releases/latest/download/sysmonconfig-excludes-only.xml',
     [string]$YamatoScriptUrl = 'https://github.com/Yamato-Security/EnableWindowsLogSettings/raw/refs/heads/main/YamatoSecurityConfigureWinEventLogs.bat'
 )
 

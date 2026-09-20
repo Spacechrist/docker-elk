@@ -387,7 +387,7 @@ if ($null -eq $output) {
     $created = Invoke-KibanaApi -Method POST -Path '/api/fleet/outputs' -Body $outputBody
     $output = $created.item
 }
-elseif (-not $output.is_preconfigured) {
+elseif (-not ($null -ne $output.PSObject.Properties["is_preconfigured"] -and $output.PSObject.Properties["is_preconfigured"].Value -eq $true)) {
     $outputBody.Remove('id')
     $updated = Invoke-KibanaApi -Method PUT -Path ('/api/fleet/outputs/' + $output.id) -Body $outputBody
     $output = $updated.item
@@ -396,7 +396,7 @@ elseif ($output.id -ne $OutputId) {
     throw "A preconfigured output named 'GOAD Windows output' exists with unexpected ID '$($output.id)'."
 }
 
-if ($null -ne $output -and $output.is_preconfigured) {
+if ($null -ne $output -and ($null -ne $output.PSObject.Properties["is_preconfigured"] -and $output.PSObject.Properties["is_preconfigured"].Value -eq $true)) {
     Write-Host "Updating preconfigured Fleet output '$OutputId' in kibana.yml..."
     $kibanaConfiguration = Join-Path $PSScriptRoot 'kibana\config\kibana.yml'
     Ensure-PreconfiguredOutputCa `
